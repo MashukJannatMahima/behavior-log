@@ -1,0 +1,969 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Behavior Observation Log</title>
+<meta name="description" content="Record frequency and duration of student behaviors with a session timer, edit the data, export to Excel and see progress graphs.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#FFFFFF" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171F1C" media="(prefers-color-scheme: dark)">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Behavior Log">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<script src="vendor/chart.umd.js"></script>
+<script src="vendor/jszip.min.js"></script>
+<style>
+/* Layout: a classroom data-collection tool. Sticky header with tabs; each tab is one job (record, review, graph, set up). Big tap targets for use on a tablet beside the student. */
+:root{
+  --bg:#F1F4F2; --surface:#FFFFFF; --sunk:#E7ECE9; --ink:#17221E; --muted:#56665F; --line:#D3DCD7;
+  --accent:#1D6A55; --accent-ink:#FFFFFF; --accent-soft:#DDEDE6; --live:#C2410C; --live-soft:#FBE7DB; --danger:#B3261E;
+  --f-display:"Avenir Next", "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, Roboto, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  --f-body:system-ui, -apple-system, "Segoe UI", Roboto, "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", sans-serif;
+  --f-mono:ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, "Roboto Mono", monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F1513; --surface:#171F1C; --sunk:#111816; --ink:#E5EDE9; --muted:#97A8A0; --line:#2A3631;
+  --accent:#5BC4A2; --accent-ink:#06120E; --accent-soft:#1C3029; --live:#FF8A4C; --live-soft:#3A2116; --danger:#FF8A80; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F1513; --surface:#171F1C; --sunk:#111816; --ink:#E5EDE9; --muted:#97A8A0; --line:#2A3631;
+  --accent:#5BC4A2; --accent-ink:#06120E; --accent-soft:#1C3029; --live:#FF8A4C; --live-soft:#3A2116; --danger:#FF8A80; color-scheme:dark}
+
+:root[data-mode="teacher"]{--accent:#3350A3;--accent-soft:#E1E7F7}
+@media (prefers-color-scheme: dark){:root[data-mode="teacher"]:not([data-theme="light"]){--accent:#8FA7F2;--accent-soft:#1B2442}}
+:root[data-theme="dark"][data-mode="teacher"]{--accent:#8FA7F2;--accent-soft:#1B2442}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.5;-webkit-tap-highlight-color:transparent;padding-bottom:env(safe-area-inset-bottom,0px)}
+img{max-width:100%}
+.wrap{max-width:1100px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+header{position:sticky;top:0;z-index:5;background:var(--surface);border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top,0px)}
+.brand img{width:28px;height:28px;border-radius:7px;align-self:center}
+.brand .short{display:none}
+.modebar{display:flex;align-items:center;gap:10px}
+.seg{display:inline-flex;background:var(--sunk);padding:3px;border-radius:999px;border:1px solid var(--line)}
+.seg button{border:0;background:transparent;color:var(--muted);font:700 .92rem var(--f-body);padding:7px 15px;border-radius:999px;cursor:pointer;min-height:36px}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+@media (max-width:640px){
+  .brand small,.brand .long,.modebar .label{display:none}
+  .brand .short{display:inline}
+  .brand{flex:1 1 auto;min-width:0;gap:8px}
+  .brand h1{font-size:1rem;white-space:nowrap}
+  .modebar{flex:none}
+  .seg button{padding:6px 11px;font-size:.86rem}
+  .hrow{gap:8px 12px}
+  nav{width:100%} nav button{flex:1;padding-inline:6px}
+}
+@media (max-width:359px){.brand img{display:none}}
+button{touch-action:manipulation}
+.tile{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}
+@media (pointer:coarse){td input,.field input,.field select,.field textarea{font-size:16px}}
+.notice .acts{display:flex;gap:8px;flex-wrap:wrap}
+.notice.warn{background:var(--live-soft)}
+.savebar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--ink);color:var(--bg);display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+  padding:12px max(16px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.savebar .btn.ghost{color:var(--bg)}
+.app-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+.app-actions .panel{display:grid;gap:10px;align-content:start}
+.app-actions p{margin:0;font-size:.92rem}
+.file-btn{position:relative;overflow:hidden}
+.file-btn input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.hrow{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding-block:10px}
+.brand{display:flex;align-items:baseline;gap:10px;min-width:0}
+.brand h1{font-family:var(--f-display);font-weight:800;font-size:1.3rem;margin:0;letter-spacing:-.01em;text-wrap:balance}
+.brand small{color:var(--muted);font-size:.8rem}
+nav{display:flex;gap:4px;background:var(--sunk);padding:4px;border-radius:999px}
+nav button{border:0;background:transparent;color:var(--muted);font:700 .9rem var(--f-body);padding:7px 14px;border-radius:999px;cursor:pointer}
+nav button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.12)}
+nav .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--live);margin-left:6px;vertical-align:middle}
+main{padding-block:20px 48px;display:grid;gap:20px}
+h2{font-family:var(--f-display);font-weight:600;font-size:1.25rem;margin:0}
+h3{font-family:var(--f-display);font-weight:600;font-size:1.05rem;margin:0}
+.label{font-size:.72rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}
+.muted{color:var(--muted)}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.btn{border:1px solid var(--line);background:var(--surface);padding:9px 16px;border-radius:8px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:8px;justify-content:center}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.live{background:var(--live);border-color:var(--live);color:#fff}
+.btn.ghost{border-color:transparent;background:transparent;color:var(--muted)}
+.btn.danger{color:var(--danger)}
+.btn.confirm{background:var(--danger);border-color:var(--danger);color:#fff}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.field{display:grid;gap:4px;min-width:0}
+.field input,.field select,.field textarea{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 11px;width:100%}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px}
+.notice{border-radius:var(--r);padding:10px 14px;background:var(--accent-soft);font-size:.92rem;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+[hidden]{display:none!important}
+
+/* Record */
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.clock{display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center}
+@media (max-width:640px){.clock{grid-template-columns:1fr}}
+.time{font-family:var(--f-mono);font-weight:600;font-size:clamp(3rem,11vw,5.2rem);line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.03em}
+.status{display:inline-flex;align-items:center;gap:8px;font-weight:700;font-size:.85rem;padding:3px 10px;border-radius:999px;background:var(--sunk);color:var(--muted)}
+.status.rec{background:var(--live-soft);color:var(--live)}
+.status.rec::before{content:"";width:8px;height:8px;border-radius:50%;background:var(--live);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.controls .btn{min-height:48px;min-width:110px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:12px}
+.tile{--c:var(--accent);position:relative;text-align:left;border:2px solid var(--line);border-left:8px solid var(--c);background:var(--surface);border-radius:var(--r);padding:14px;min-height:132px;display:flex;flex-direction:column;gap:4px;cursor:pointer;transition:transform .08s}
+.tile:active:not(:disabled){transform:scale(.97)}
+.tile:disabled{cursor:not-allowed;opacity:.55}
+.tile .n{font-weight:700;font-size:1.02rem;line-height:1.25}
+.tile .v{font-family:var(--f-mono);font-weight:600;font-size:2rem;font-variant-numeric:tabular-nums;margin-top:auto}
+.tile .k{font-size:.78rem;color:var(--muted)}
+.tile.on{border-color:var(--c);background:color-mix(in srgb,var(--c) 14%,var(--surface))}
+.tile.on .k{color:var(--ink);font-weight:700}
+.tile.flash{animation:flash .35s}
+@keyframes flash{from{background:color-mix(in srgb,var(--c) 30%,var(--surface))}}
+.rec-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+@media (max-width:760px){.rec-grid{grid-template-columns:1fr}}
+.log{list-style:none;margin:0;padding:0;max-height:240px;overflow:auto;font-size:.92rem}
+.log li{display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);align-items:center}
+.log time{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);min-width:56px}
+.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.headrow{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+
+/* Data */
+.tablebox{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r);background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:.9rem;font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid var(--line);padding:0;text-align:left;white-space:nowrap}
+th{background:var(--sunk);padding:8px 10px;font-weight:700;font-size:.78rem;vertical-align:bottom;position:sticky;top:0}
+th .u{display:block;font-weight:400;color:var(--muted)}
+td input{border:0;background:transparent;padding:9px 10px;width:100%;min-width:70px}
+td input:focus{background:var(--accent-soft);outline:2px solid var(--accent);outline-offset:-2px}
+td input.num{text-align:right;width:84px;min-width:64px;font-family:var(--f-mono)}
+td input.wide{min-width:140px}
+td input.notes{min-width:220px}
+td.calc{padding:9px 10px;color:var(--muted);text-align:right;font-family:var(--f-mono)}
+td.act{padding:0 6px}
+tr.ex td{background:color-mix(in srgb,var(--accent-soft) 45%,transparent)}
+.tag{font-size:.7rem;font-weight:700;padding:1px 7px;border-radius:999px;background:var(--accent-soft);color:var(--accent)}
+
+/* Graphs */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.stat{border-left:3px solid var(--accent);padding:2px 0 2px 12px}
+.stat b{display:block;font-family:var(--f-mono);font-size:1.5rem;font-variant-numeric:tabular-nums}
+.chartbox{position:relative;height:300px}
+.charts{display:grid;gap:16px}
+.filters{display:flex;gap:12px;flex-wrap:wrap;align-items:end}
+.filters .field{min-width:180px}
+
+/* Setup */
+.beh{display:grid;grid-template-columns:44px minmax(0,1.2fr) minmax(0,.8fr) auto;gap:10px;align-items:start;padding-block:14px;border-bottom:1px solid var(--line)}
+.beh .def{grid-column:2/4}
+.beh input[type=color]{width:44px;height:42px;padding:2px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+@media (max-width:560px){.beh{grid-template-columns:44px minmax(0,1fr)}.beh .def,.beh .ty,.beh .del{grid-column:2}}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-weight:700;z-index:20;max-width:calc(100% - 32px)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<header>
+  <div class="wrap hrow">
+    <div class="brand"><img src="icons/icon-192.png" alt=""><h1><span class="long">Behavior Observation Log</span><span class="short">Behavior Log</span></h1><small id="storeLine">Loading…</small></div>
+    <div class="modebar" role="group" aria-label="Who are you observing?">
+      <span class="label">Observing</span>
+      <div class="seg" id="modeSeg">
+        <button type="button" data-mode="student" aria-pressed="true">Student</button>
+        <button type="button" data-mode="teacher" aria-pressed="false">Teacher</button>
+      </div>
+    </div>
+    <nav role="tablist" aria-label="Sections">
+      <button role="tab" id="tab-record" aria-selected="true" data-view="record">Record<span class="dot" id="recDot" hidden></span></button>
+      <button role="tab" id="tab-data" aria-selected="false" data-view="data">Data</button>
+      <button role="tab" id="tab-graphs" aria-selected="false" data-view="graphs">Graphs</button>
+      <button role="tab" id="tab-setup" aria-selected="false" data-view="setup">Setup</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="notice warn" id="inAppWarn" hidden><span><b>You opened this link inside another app.</b> Installing and saving data may not work here. Tap the menu (⋯) and choose <b>Open in Safari</b> or <b>Open in Chrome</b>, then install from there.</span></div>
+  <div class="notice" id="installBanner" hidden><span id="ibText"></span><div class="acts"><button class="btn primary" id="ibInstall" hidden>Install app</button><button class="btn ghost" id="ibClose">Not now</button></div></div>
+  <div class="notice" id="updNotice" hidden><span>A new version of the app is ready.</span><button class="btn primary" id="bUpdate">Update now</button></div>
+  <div class="notice" id="bakNotice" hidden><span id="bakText"></span><button class="btn" id="bBackup2">Download backup</button></div>
+  <div class="notice" id="exNotice" hidden><span>You're looking at <b>example sessions</b> so you can see how the tables and graphs work. They disappear when you save your first real session.</span></div>
+
+  <!-- RECORD -->
+  <section id="view-record" class="view" style="display:grid;gap:20px">
+    <div class="notice" id="draftNotice" hidden><span>An unsaved session was restored. It is paused.</span></div>
+    <div class="meta">
+      <label class="field"><span class="label" id="lblSubject">Student</span><input id="mStudent" list="studentList" placeholder="Initials or code, e.g. J.L." autocomplete="off"></label>
+      <label class="field"><span class="label">Setting / activity</span><input id="mSetting" list="settingList" placeholder="e.g. Math small group" autocomplete="off"></label>
+      <label class="field"><span class="label">Observer</span><input id="mObserver" placeholder="Your name" autocomplete="off"></label>
+    </div>
+    <datalist id="studentList"></datalist><datalist id="settingList"></datalist>
+
+    <div class="panel clock">
+      <div>
+        <span class="status" id="status">Ready</span>
+        <div class="time" id="clock" aria-live="off">0:00</div>
+      </div>
+      <div class="controls">
+        <button class="btn primary" id="bStart">Start session</button>
+        <button class="btn" id="bPause" hidden>Pause</button>
+        <button class="btn live" id="bEnd" hidden>End &amp; save</button>
+        <button class="btn ghost danger" id="bDiscard" hidden>Discard</button>
+      </div>
+    </div>
+
+    <div>
+      <div class="headrow"><h2>Tap when the behavior happens</h2><span class="muted" id="tileHint" style="font-size:.9rem">Start the session to begin recording.</span></div>
+      <div class="tiles" id="tiles"></div>
+    </div>
+
+    <div class="rec-grid">
+      <div class="panel">
+        <div class="headrow"><h3>Event log</h3><button class="btn ghost" id="bUndo" disabled>Undo last</button></div>
+        <ul class="log" id="log"><li class="muted">No events yet.</li></ul>
+      </div>
+      <div class="panel field">
+        <h3 style="margin-bottom:6px">Notes</h3>
+        <span class="muted" style="font-size:.85rem">Antecedents, consequences, anything unusual about today.</span>
+        <textarea id="mNotes" rows="6" placeholder="e.g. Called out mostly during independent work after the transition from recess."></textarea>
+      </div>
+    </div>
+  </section>
+
+  <!-- DATA -->
+  <section id="view-data" class="view" hidden style="display:grid;gap:16px">
+    <div class="headrow" style="margin:0">
+      <div><h2>Session data</h2><span class="muted" id="dataCount"></span></div>
+      <div class="controls">
+        <label class="field" style="min-width:170px"><span class="label" id="lblDSubject">Student</span><select id="dStudent"></select></label>
+        <button class="btn primary" id="bExport" style="align-self:end">Download Excel (.xlsx)</button>
+      </div>
+    </div>
+    <p class="muted" style="margin:0;font-size:.9rem">Click any cell to correct it. Changes save when you leave the cell. Durations are minutes:seconds.</p>
+    <div class="tablebox"><table id="table"></table></div>
+  </section>
+
+  <!-- GRAPHS -->
+  <section id="view-graphs" class="view" hidden style="display:grid;gap:16px">
+    <div class="filters">
+      <label class="field"><span class="label" id="lblGSubject">Student</span><select id="gStudent"></select></label>
+      <label class="field"><span class="label">Setting</span><select id="gSetting"></select></label>
+    </div>
+    <div class="stats" id="stats"></div>
+    <div class="charts">
+      <div class="panel" id="pRate"><div class="headrow"><div><h3>Frequency behaviors</h3><span class="muted" style="font-size:.85rem">Rate per minute, each session</span></div><button class="btn ghost" data-png="rate">Save as image</button></div><div class="chartbox"><canvas id="cRate"></canvas></div></div>
+      <div class="panel" id="pPct"><div class="headrow"><div><h3>Duration behaviors</h3><span class="muted" style="font-size:.85rem">Percent of session time, each session</span></div><button class="btn ghost" data-png="pct">Save as image</button></div><div class="chartbox"><canvas id="cPct"></canvas></div></div>
+      <div class="panel" id="pSet"><div class="headrow"><div><h3>By setting</h3><span class="muted" style="font-size:.85rem">Average rate per minute in each setting or activity</span></div><button class="btn ghost" data-png="set">Save as image</button></div><div class="chartbox"><canvas id="cSet"></canvas></div></div>
+    </div>
+  </section>
+
+  <!-- SETUP -->
+  <section id="view-setup" class="view" hidden style="display:grid;gap:16px">
+    <div>
+      <h2 id="setupTitle">Behaviors to record</h2>
+      <p class="muted" id="setupIntro" style="margin:4px 0 0;max-width:65ch"></p>
+    </div>
+    <div class="panel" style="padding-block:4px">
+      <div id="behList"></div>
+      <div style="padding-block:14px"><button class="btn" id="bAddBeh">+ Add behavior</button></div>
+    </div>
+    <h2 style="margin-top:12px">App &amp; backup</h2>
+    <div class="app-actions">
+      <div class="panel" id="installPanel">
+        <h3>Install on this device</h3>
+        <p class="muted" id="installText">Add the app to your home screen or desktop. It then opens in its own window and works without internet.</p>
+        <button class="btn primary" id="bInstall" hidden>Install app</button>
+      </div>
+      <div class="panel">
+        <h3>Back up your data</h3>
+        <p class="muted">Your records stay on this device only. Download a backup file every week, and keep it somewhere safe like your school drive.</p>
+        <p id="lastBak" style="font-weight:700"></p>
+        <button class="btn" id="bBackup">Download backup</button>
+      </div>
+      <div class="panel">
+        <h3>Restore or move to a new device</h3>
+        <p class="muted">Open a backup file to add its sessions to this device. Sessions already here are kept.</p>
+        <label class="btn file-btn">Open backup file<input type="file" id="fRestore" accept=".json,application/json"></label>
+      </div>
+    </div>
+    <p class="muted" id="storeDetail" style="font-size:.9rem;margin:0"></p>
+    <p class="muted" style="font-size:.85rem;margin:0">Behavior Observation Log · version <span id="appVer"></span></p>
+  </section>
+</main>
+<div class="toast" id="toast" hidden></div>
+<div class="savebar" id="saveBar" hidden><span id="saveBarText"></span><span class="acts" style="display:flex;gap:8px"><button class="btn primary" id="saveBarBtn">Save file</button><button class="btn ghost" id="saveBarX">Cancel</button></span></div>
+
+<script>
+(() => {
+const COLORS = ['#2F7DD1','#D9822B','#8E5BD6','#C2416B','#2E9E6A','#B08D12','#3B9AA8','#7A6A58'];
+const APP_VERSION = '1.1.0';
+const DEFAULTS = {
+  student: [
+    {id:'b-call', name:'Calling out', type:'freq', color:'#2F7DD1', def:'Speaks or shouts without raising a hand or being called on during instruction.'},
+    {id:'b-seat', name:'Out of seat', type:'dur', color:'#D9822B', def:'Bottom leaves the seat for 3+ seconds without permission. Ends when seated again.'},
+    {id:'b-hit', name:'Hitting / pushing', type:'freq', color:'#C2416B', def:'Forceful contact with another person using hand, arm, foot or an object.'},
+    {id:'b-task', name:'On-task', type:'dur', color:'#2E9E6A', def:'Eyes on materials or teacher and working on the assigned activity.'},
+  ],
+  teacher: [
+    {id:'t-praise', name:'Behavior-specific praise', type:'freq', color:'#2E9E6A', def:'Teacher tells a student or the group exactly what was done well, e.g. \u201cNice job raising your hand.\u201d'},
+    {id:'t-otr', name:'Opportunities to respond', type:'freq', color:'#2F7DD1', def:'Teacher asks a question or gives a prompt that students must answer by speaking, writing or gesturing.'},
+    {id:'t-corr', name:'Corrective feedback', type:'freq', color:'#D9822B', def:'Teacher tells a student what to fix or do differently after an error or a broken rule.'},
+    {id:'t-inst', name:'Direct instruction', type:'dur', color:'#8E5BD6', def:'Teacher is presenting, modeling or explaining to the group. Ends when students begin independent work.'},
+    {id:'t-circ', name:'Circulating', type:'dur', color:'#3B9AA8', def:'Teacher moves around the room checking work or helping individual students.'},
+  ],
+};
+const MODES = {
+  student: {label:'Student', plural:'students', ph:'Initials or code, e.g. J.L.',
+    notes:'e.g. Called out mostly during independent work after the transition from recess.',
+    intro:'Use <b>Frequency</b> for brief behaviors you count (calling out, hitting). Use <b>Duration</b> for behaviors that last (out of seat, on-task): tap once when it starts and again when it stops. Write an operational definition so every observer records the same thing.'},
+  teacher: {label:'Teacher', plural:'teachers', ph:'Initials or code, e.g. Ms. L.',
+    notes:'e.g. Most praise went to the front group. Few chances to respond during the transition.',
+    intro:'Use <b>Frequency</b> for teacher actions you count (praise statements, questions asked). Use <b>Duration</b> for activities that last (direct instruction, circulating): tap once when it starts and again when it stops. Write an operational definition so every observer records the same thing.'},
+};
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const newId = p => p + Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4);
+const fmt = sec => { sec = Math.max(0, Math.round(sec||0)); const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+  return (h ? h+':'+String(m).padStart(2,'0') : m) + ':' + String(s).padStart(2,'0'); };
+const parseDur = str => { const t = String(str).trim(); if(!t) return 0; const p = t.split(':').map(Number);
+  if(p.some(n => isNaN(n) || n < 0)) return null; return Math.round(p.reduce((a,v) => a*60+v, 0)); };
+const r2 = n => Math.round(n*100)/100;
+const pad = n => String(n).padStart(2,'0');
+const today = () => { const d=new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const nowTime = () => { const d=new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const lsGet = k => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
+const lsSet = (k,v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
+const clone = v => JSON.parse(JSON.stringify(v));
+let toastT;
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2600); }
+
+/* ---------- state ---------- */
+/* mode = who is being observed ('student' or 'teacher'). Each mode has its own behaviors and sessions.
+   state.sessions holds sessions of both modes; use cur() for the ones in the current mode.
+   A session's person is stored in s.student (kept for older saves), whichever mode it is. */
+const state = { mode: lsGet('bol-mode') === 'teacher' ? 'teacher' : 'student', sets: {student: clone(DEFAULTS.student), teacher: clone(DEFAULTS.teacher)},
+  sessions: [], recorded: {student:false, teacher:false}, examples: false };
+Object.defineProperty(state, 'behaviors', { get(){ return this.sets[this.mode]; }, set(v){ this.sets[this.mode] = v; } });
+const behById = id => state.behaviors.find(b => b.id === id);
+const subj = s => s.subject === 'teacher' ? 'teacher' : 'student';
+const cur = () => state.sessions.filter(s => subj(s) === state.mode);
+const cfgBody = () => clone({sets: state.sets, recorded: state.recorded});
+function loadCfg(c){
+  if(!c) return;
+  if(c.sets){ ['student','teacher'].forEach(m => { if(Array.isArray(c.sets[m]) && c.sets[m].length) state.sets[m] = c.sets[m]; }); }
+  else if(Array.isArray(c.behaviors) && c.behaviors.length) state.sets.student = c.behaviors;   // saves from version 1.0
+  if(c.recorded) Object.assign(state.recorded, c.recorded); else if(c.hasRecorded) state.recorded.student = true;
+}
+
+function exampleSessions(mode){
+  if(mode === 'teacher') return exampleTeacherSessions();
+  const out = []; let seed = 7; const rnd = () => (seed = (seed*9301+49297)%233280)/233280;
+  const settings = ['Math small group','Reading block','After recess'];
+  const days = ['2026-10-06','2026-10-08','2026-10-10','2026-10-14','2026-10-16','2026-10-20','2026-10-22','2026-10-24','2026-10-28','2026-10-29'];
+  days.forEach((d,i) => {
+    const len = 900 + Math.round(rnd()*6)*60, setting = settings[i%3], hard = setting==='After recess' ? 1.5 : 1;
+    const calls = Math.max(1, Math.round((15 - i*1.1)*hard*(len/1200) + rnd()*3));
+    const seat = Math.round(len*(0.26 - i*0.018)*hard + rnd()*30);
+    const task = Math.round(len*(0.48 + i*0.035) - rnd()*40);
+    out.push({ id:'ex-'+i, example:true, kind:'session', date:d, time: setting==='After recess'?'13:10':(i%3?'10:20':'09:05'),
+      student:'Example J.L.', setting, observer:'Ms. Lin', durationSec: len, notes: i===4?'Substitute teacher today.':'',
+      results:{'b-call':{count:calls,seconds:0},'b-seat':{count:Math.max(1,Math.round(seat/60)),seconds:seat},'b-hit':{count:i<5?Math.round(rnd()*2):0,seconds:0},'b-task':{count:3,seconds:Math.min(task,len)}},
+      events:[] });
+  });
+  out.push({ id:'ex-k', example:true, kind:'session', date:'2026-10-29', time:'11:00', student:'Example K.W.', setting:'Reading block', observer:'Ms. Lin',
+    durationSec:1200, notes:'', results:{'b-call':{count:6,seconds:0},'b-seat':{count:2,seconds:140},'b-hit':{count:0,seconds:0},'b-task':{count:2,seconds:780}}, events:[] });
+  return out;
+}
+function exampleTeacherSessions(){
+  const out = []; let seed = 11; const rnd = () => (seed = (seed*9301+49297)%233280)/233280;
+  const settings = ['Math lesson','Reading block','Science lab'];
+  const days = ['2026-10-05','2026-10-08','2026-10-12','2026-10-15','2026-10-19','2026-10-22','2026-10-26','2026-10-29'];
+  days.forEach((d,i) => {
+    const len = 1200 + Math.round(rnd()*4)*60, setting = settings[i%3], mins = len/60;
+    const praise = Math.round(mins*(0.25 + i*0.07) + rnd()*2), otr = Math.round(mins*(0.8 + i*0.08) + rnd()*4), corr = Math.round(mins*(0.5 - i*0.03) + rnd()*2);
+    const inst = Math.round(len*(0.55 - i*0.02) + rnd()*60), circ = Math.round(len*(0.12 + i*0.03) + rnd()*40);
+    out.push({ id:'ext-'+i, example:true, subject:'teacher', kind:'session', date:d, time: i%2 ? '10:15' : '09:00', student:'Example Ms. L.', setting, observer:'Dr. Wu',
+      durationSec: len, notes: i===0 ? 'First observation of the term.' : '',
+      results:{'t-praise':{count:praise,seconds:0},'t-otr':{count:otr,seconds:0},'t-corr':{count:Math.max(1,corr),seconds:0},'t-inst':{count:3,seconds:Math.min(inst,len)},'t-circ':{count:4,seconds:Math.min(circ,len)}}, events:[] });
+  });
+  out.push({ id:'ext-k', example:true, subject:'teacher', kind:'session', date:'2026-10-29', time:'13:00', student:'Example Mr. C.', setting:'Math lesson', observer:'Dr. Wu',
+    durationSec:1500, notes:'', results:{'t-praise':{count:9,seconds:0},'t-otr':{count:22,seconds:0},'t-corr':{count:11,seconds:0},'t-inst':{count:2,seconds:900},'t-circ':{count:3,seconds:240}}, events:[] });
+  return out;
+}
+const sorted = (list, dir=1) => [...list].sort((a,b) => dir * ((a.date+a.time).localeCompare(b.date+b.time)));
+
+/* ---------- storage: IndexedDB on this device, localStorage fallback ---------- */
+const LS_KEY = 'bol-data-v1', LS_DRAFT = 'bol-draft-v1', LS_BAK = 'bol-last-backup';
+const idb = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    if(!('indexedDB' in window)) return rej(new Error('no idb'));
+    const r = indexedDB.open('behavior-observation-log', 1);
+    r.onupgradeneeded = () => { r.result.createObjectStore('kv'); r.result.createObjectStore('sessions', {keyPath:'id'}); };
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  }));
+  const tx = async (name, mode, fn) => { const db = await open(); return new Promise((res, rej) => {
+    const t = db.transaction(name, mode), st = t.objectStore(name); const out = fn(st);
+    t.oncomplete = () => res(out && 'result' in out ? out.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error); }); };
+  return {
+    open,
+    get: k => tx('kv', 'readonly', st => st.get(k)),
+    put: (k, v) => tx('kv', 'readwrite', st => st.put(v, k)),
+    all: () => tx('sessions', 'readonly', st => st.getAll()),
+    putSession: s => tx('sessions', 'readwrite', st => st.put(s)),
+    putSessions: list => tx('sessions', 'readwrite', st => { list.forEach(s => st.put(s)); }),
+    delSession: id => tx('sessions', 'readwrite', st => st.delete(id)),
+  };
+})();
+const store = { mode:'loading', chain: Promise.resolve() };
+function queue(fn){
+  store.chain = store.chain.then(fn).catch(e => { console.warn(e);
+    toast(e && e.name === 'QuotaExceededError' ? 'This device is out of storage space. Download a backup, then delete old sessions.' : 'Could not save. Download a backup now to be safe.'); });
+  return store.chain;
+}
+function saveLocalAll(){ if(!lsSet(LS_KEY, { ...cfgBody(), sessions: state.sessions.filter(s => !s.example) })) toast('Could not save. Download a backup now to be safe.'); }
+const sessionBody = s => { const {example, ...rest} = s; return clone({...rest, kind:'session'}); };
+let cfgTimer;
+function saveConfig(){ clearTimeout(cfgTimer); cfgTimer = setTimeout(() => {
+  if(store.mode === 'idb') queue(() => idb.put('config', cfgBody()));
+  else if(store.mode === 'local') saveLocalAll(); }, 300); }
+function saveSession(s){ if(s.example) return;
+  if(store.mode === 'idb') queue(() => idb.putSession(sessionBody(s))); else if(store.mode === 'local') saveLocalAll(); updateBackupInfo(); }
+function deleteSession(s){ state.sessions = state.sessions.filter(x => x !== s);
+  if(!s.example){ if(store.mode === 'idb') queue(() => idb.delSession(s.id)); else if(store.mode === 'local') saveLocalAll(); }
+  renderData(); renderGraphs(); refreshLists(); }
+
+function applyExamples(){
+  const real = state.sessions.filter(s => !s.example), ex = [];
+  ['student','teacher'].forEach(m => { if(!state.recorded[m] && !real.some(x => subj(x) === m)) ex.push(...exampleSessions(m)); });
+  state.sessions = [...real, ...ex];
+  state.examples = ex.some(x => subj(x) === state.mode);
+  $('#exNotice').hidden = !state.examples;
+}
+
+async function initStore(){
+  try {
+    await idb.open();
+    const [cfg, sessions] = await Promise.all([idb.get('config'), idb.all()]);
+    store.mode = 'idb';
+    // one-time move from older localStorage saves
+    const old = lsGet(LS_KEY);
+    if(old && !cfg && !sessions.length){ if(old.sessions?.length) await idb.putSessions(old.sessions.map(sessionBody));
+      await idb.put('config', {behaviors: old.behaviors || state.behaviors, hasRecorded: !!old.hasRecorded}); lsSet(LS_KEY, null); return initStore(); }
+    loadCfg(cfg);
+    state.sessions = sessions.filter(s => s && s.id);
+  } catch(e) {
+    console.warn('IndexedDB unavailable', e);
+    const saved = lsGet(LS_KEY);
+    store.mode = lsSet('bol-probe', 1) ? 'local' : 'none';
+    if(saved){ loadCfg(saved); state.sessions = saved.sessions || []; }
+  }
+  if(store.mode === 'none') setStoreLine('Not saving · private browsing?', 'This browser is not letting the app save data, which usually means a private or incognito window. Open the app in a normal window, or download Excel before closing.');
+  else setStoreLine('Saved on this device', 'Records are saved on this device only, in this browser. Nothing is sent to a server, so other teachers and devices cannot see them. Use Download backup to keep a copy or move to another device.');
+  try { if(navigator.storage?.persist && !(await navigator.storage.persisted())) await navigator.storage.persist(); } catch {}
+  applyExamples(); renderEverything(); updateBackupInfo();
+}
+function setStoreLine(short, long){ $('#storeLine').textContent = short; $('#storeDetail').textContent = long; }
+
+/* ---------- backup / restore ---------- */
+function updateBackupInfo(){
+  const real = state.sessions.filter(s => !s.example);
+  const last = lsGet(LS_BAK);
+  const days = last ? Math.floor((Date.now() - last.at) / 86400000) : null;
+  const newer = last ? real.length - (last.count || 0) : real.length;
+  $('#lastBak').textContent = last ? `Last backup: ${days === 0 ? 'today' : days === 1 ? 'yesterday' : days + ' days ago'} (${last.count} session${last.count===1?'':'s'})` : 'No backup downloaded on this device yet.';
+  const show = real.length >= 3 && newer > 0 && (days == null || days >= 7);
+  $('#bakNotice').hidden = !show;
+  if(show) $('#bakText').textContent = `${newer} session${newer===1?' is':'s are'} not backed up yet. Your data lives only on this device.`;
+}
+async function downloadBackup(){
+  const real = state.sessions.filter(s => !s.example).map(sessionBody);
+  if(!real.length){ toast('There are no sessions to back up yet'); return; }
+  const body = JSON.stringify({app:'behavior-observation-log', format:2, exportedAt:new Date().toISOString(), sets: state.sets, recorded: state.recorded, behaviors: state.sets.student, sessions: real}, null, 1);
+  const ok = await offerFile(`behavior-log-backup-${today()}.json`, new Blob([body], {type:'application/json'}));
+  if(ok){ lsSet(LS_BAK, {at: Date.now(), count: real.length}); updateBackupInfo(); }
+}
+$('#bBackup').addEventListener('click', downloadBackup);
+$('#bBackup2').addEventListener('click', downloadBackup);
+$('#fRestore').addEventListener('change', async e => {
+  const file = e.target.files[0]; e.target.value = ''; if(!file) return;
+  if(rec){ toast('Finish the current session before restoring'); return; }
+  let data; try { data = JSON.parse(await file.text()); } catch { toast('That file is not a backup from this app'); return; }
+  if(data?.app !== 'behavior-observation-log' || !Array.isArray(data.sessions)){ toast('That file is not a backup from this app'); return; }
+  const incoming = data.sessions.filter(s => s && s.id && s.date);
+  const have = new Set(state.sessions.filter(s => !s.example).map(s => s.id));
+  const added = incoming.filter(s => !have.has(s.id));
+  const inSets = data.sets || {student: data.behaviors || []};
+  ['student','teacher'].forEach(m => (inSets[m] || []).forEach(b => { if(b && b.id && !state.sets[m].some(x => x.id === b.id)) state.sets[m].push(b); }));
+  incoming.forEach(x => { state.recorded[subj(x)] = true; });
+  state.sessions.push(...added.map(x => ({...x, subject: subj(x), kind:'session'})));
+  applyExamples();
+  if(store.mode === 'idb'){ await queue(() => idb.putSessions(added.map(x => sessionBody({...x, subject: subj(x)})))); await queue(() => idb.put('config', cfgBody())); }
+  else if(store.mode === 'local') saveLocalAll();
+  renderEverything(); updateBackupInfo();
+  toast(added.length ? `Added ${added.length} session${added.length===1?'':'s'} from the backup` : 'All sessions in that backup are already here');
+});
+
+/* ---------- tabs ---------- */
+let view = 'record';
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  view = b.dataset.view;
+  document.querySelectorAll('nav button').forEach(x => x.setAttribute('aria-selected', x === b));
+  document.querySelectorAll('.view').forEach(v => v.hidden = v.id !== 'view-' + view);
+  if(view === 'graphs') renderGraphs();
+  if(view === 'data') renderData();
+}));
+
+/* ---------- recording ---------- */
+let rec = null; // {running, startedAt, before, events:[], active:{}, results:{}, date, time}
+let ticker = null, wakeLock = null;
+const elapsed = () => rec ? rec.before + (rec.running ? (Date.now() - rec.startedAt)/1000 : 0) : 0;
+function blankResults(){ const r = {}; state.behaviors.forEach(b => r[b.id] = {count:0, seconds:0}); return r; }
+function saveDraft(){ if(!rec) return lsSet(LS_DRAFT, null); lsSet(LS_DRAFT, {...rec, running:false, before: elapsed(), meta: readMeta(), mode: rec.mode || state.mode}); }
+function readMeta(){ return { student: $('#mStudent').value.trim(), setting: $('#mSetting').value.trim(), observer: $('#mObserver').value.trim(), notes: $('#mNotes').value }; }
+
+async function lockScreen(){ try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; } }
+function releaseLock(){ try { wakeLock?.release(); } catch {} wakeLock = null; }
+
+$('#bStart').addEventListener('click', () => {
+  if(!rec){ rec = { running:false, before:0, events:[], active:{}, results: blankResults(), date: today(), time: nowTime(), mode: state.mode }; }
+  rec.running = true; rec.startedAt = Date.now(); $('#draftNotice').hidden = true;
+  lockScreen(); startTicker(); renderRecord(); saveDraft();
+});
+$('#bPause').addEventListener('click', () => {
+  if(!rec) return;
+  if(rec.running){ rec.before = elapsed(); rec.running = false; releaseLock(); }
+  else { rec.running = true; rec.startedAt = Date.now(); lockScreen(); }
+  renderRecord(); saveDraft();
+});
+let discardArm = 0;
+$('#bDiscard').addEventListener('click', e => {
+  if(Date.now() - discardArm > 3000){ discardArm = Date.now(); e.target.textContent = 'Tap again to discard'; e.target.classList.add('confirm'); setTimeout(() => { e.target.textContent='Discard'; e.target.classList.remove('confirm'); }, 3000); return; }
+  rec = null; stopTicker(); releaseLock(); lsSet(LS_DRAFT, null); $('#mNotes').value=''; renderRecord(); toast('Session discarded');
+});
+$('#bEnd').addEventListener('click', () => {
+  if(!rec) return;
+  const meta = readMeta();
+  if(!meta.student){ toast(`Add the ${MODES[state.mode].label.toLowerCase()}’s initials or code first`); $('#mStudent').focus(); return; }
+  const end = elapsed();
+  Object.entries(rec.active).forEach(([bid, st]) => { rec.results[bid].seconds += end - st; rec.events.push({t:end, b:bid, k:'stop'}); });
+  Object.values(rec.results).forEach(r => r.seconds = Math.round(r.seconds));
+  const s = { id: newId('s-'), kind:'session', subject: rec.mode || state.mode, date: rec.date, time: rec.time, student: meta.student, setting: meta.setting, observer: meta.observer,
+    notes: meta.notes, durationSec: Math.round(end), results: rec.results, events: rec.events.map(e => ({...e, t: Math.round(e.t*10)/10})) };
+  if(state.examples){ state.sessions = state.sessions.filter(x => !(x.example && subj(x) === state.mode)); state.examples = false; $('#exNotice').hidden = true; }
+  if(!state.recorded[state.mode]){ state.recorded[state.mode] = true; saveConfig(); }
+  state.sessions.push(s); saveSession(s);
+  rec = null; stopTicker(); releaseLock(); lsSet(LS_DRAFT, null); $('#mNotes').value = '';
+  renderRecord(); refreshLists(); renderData(); toast(`Saved ${fmt(s.durationSec)} session for ${s.student}`);
+});
+
+function tap(bid){
+  if(!rec || !rec.running) return;
+  const b = behById(bid), t = elapsed(); if(!rec.results[bid]) rec.results[bid] = {count:0, seconds:0};
+  if(b.type === 'freq'){ rec.results[bid].count++; rec.events.push({t, b:bid, k:'tap'}); }
+  else if(rec.active[bid] != null){ rec.results[bid].seconds += t - rec.active[bid]; delete rec.active[bid]; rec.events.push({t, b:bid, k:'stop'}); }
+  else { rec.active[bid] = t; rec.results[bid].count++; rec.events.push({t, b:bid, k:'start'}); }
+  const el = document.querySelector(`.tile[data-b="${bid}"]`); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  try { navigator.vibrate?.(20); } catch {}
+  renderRecordLive(); renderLog(); saveDraft();
+}
+$('#bUndo').addEventListener('click', () => {
+  if(!rec || !rec.events.length) return;
+  const e = rec.events.pop(), r = rec.results[e.b];
+  if(e.k === 'tap') r.count--;
+  else if(e.k === 'start'){ delete rec.active[e.b]; r.count--; }
+  else { const st = [...rec.events].reverse().find(x => x.b === e.b && x.k === 'start'); const s0 = st ? st.t : e.t; r.seconds -= e.t - s0; rec.active[e.b] = s0; }
+  renderRecordLive(); renderLog(); saveDraft(); toast('Removed last event');
+});
+function startTicker(){ stopTicker(); ticker = setInterval(renderRecordLive, 250); }
+function stopTicker(){ clearInterval(ticker); ticker = null; }
+
+function renderTiles(){
+  $('#tiles').innerHTML = state.behaviors.map(b => `
+    <button class="tile" data-b="${esc(b.id)}" style="--c:${esc(b.color)}" title="${esc(b.def||'')}">
+      <span class="n">${esc(b.name)}</span>
+      <span class="k" data-k>${b.type==='freq' ? 'Frequency · tap to count' : 'Duration · tap to start'}</span>
+      <span class="v" data-v>0</span>
+    </button>`).join('');
+  document.querySelectorAll('.tile').forEach(t => t.addEventListener('click', () => tap(t.dataset.b)));
+}
+function renderRecordLive(){
+  const t = elapsed();
+  $('#clock').textContent = fmt(t);
+  document.querySelectorAll('.tile').forEach(el => {
+    const b = behById(el.dataset.b); if(!b) return;
+    const r = rec?.results[b.id] || {count:0, seconds:0}, on = rec && rec.active[b.id] != null;
+    el.disabled = !(rec && rec.running);
+    el.classList.toggle('on', !!on);
+    el.querySelector('[data-v]').textContent = b.type === 'freq' ? r.count : fmt(r.seconds + (on ? t - rec.active[b.id] : 0));
+    el.querySelector('[data-k]').textContent = b.type === 'freq' ? 'Frequency · tap to count' : (on ? 'Happening now · tap to stop' : 'Duration · tap to start');
+  });
+  $('#bUndo').disabled = !(rec && rec.events.length);
+}
+function renderLog(){
+  const ev = rec ? [...rec.events].reverse() : [];
+  $('#log').innerHTML = ev.length ? ev.map(e => { const b = behById(e.b);
+    return `<li><time>${fmt(e.t)}</time><span class="sw" style="background:${esc(b?.color||'#888')}"></span><span>${esc(b?.name||'Removed behavior')}${e.k==='start'?' started':e.k==='stop'?' stopped':''}</span></li>`; }).join('')
+    : '<li class="muted">No events yet.</li>';
+}
+function renderRecord(){
+  const running = rec && rec.running, active = !!rec;
+  $('#bStart').hidden = active; $('#bPause').hidden = !active; $('#bEnd').hidden = !active; $('#bDiscard').hidden = !active;
+  $('#bPause').textContent = running ? 'Pause' : 'Resume';
+  const st = $('#status'); st.className = 'status' + (running ? ' rec' : '');
+  st.textContent = running ? 'Recording' : active ? 'Paused' : 'Ready';
+  $('#recDot').hidden = !running;
+  $('#tileHint').textContent = running ? 'Tap a tile each time it happens. Definitions are on the Setup tab.' : active ? 'Paused. Resume to keep recording.' : 'Start the session to begin recording.';
+  renderRecordLive(); renderLog();
+}
+window.addEventListener('pagehide', saveDraft);
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible' && rec?.running) lockScreen(); });
+
+/* ---------- datalists ---------- */
+function refreshLists(){
+  const uniq = k => [...new Set(cur().map(s => s[k]).filter(Boolean))].sort();
+  $('#studentList').innerHTML = uniq('student').map(v => `<option value="${esc(v)}">`).join('');
+  $('#settingList').innerHTML = uniq('setting').map(v => `<option value="${esc(v)}">`).join('');
+  const students = uniq('student');
+  const fill = (sel, opts, all) => { const cur = sel.value; sel.innerHTML = (all ? `<option value="">${all}</option>` : '') + opts.map(v => `<option>${esc(v)}</option>`).join(''); if([...sel.options].some(o => o.value === cur)) sel.value = cur; };
+  fill($('#dStudent'), students, 'All ' + MODES[state.mode].plural);
+  const gCur = $('#gStudent').value;
+  fill($('#gStudent'), students, null);
+  if(!gCur && students.length){ const counts = {}; cur().forEach(s => counts[s.student] = (counts[s.student]||0)+1); $('#gStudent').value = students.sort((a,b) => counts[b]-counts[a])[0]; }
+  const settings = [...new Set(cur().filter(s => s.student === $('#gStudent').value).map(s => s.setting).filter(Boolean))].sort();
+  fill($('#gSetting'), settings, 'All settings');
+}
+
+/* ---------- data table ---------- */
+let tableDirty = false;
+function renderData(){
+  const box = $('#table');
+  if(box.contains(document.activeElement)){ tableDirty = true; return; }
+  tableDirty = false;
+  const f = $('#dStudent').value;
+  const list = sorted(cur().filter(s => !f || s.student === f), -1);
+  $('#dataCount').textContent = `${list.length} session${list.length===1?'':'s'}`;
+  const B = state.behaviors;
+  const head = `<tr><th>Date</th><th>Start</th><th>${MODES[state.mode].label}</th><th>Setting</th><th>Observer</th><th>Length<span class="u">m:ss</span></th>
+    ${B.map(b => b.type==='freq' ? `<th><span class="sw" style="background:${esc(b.color)};display:inline-block"></span> ${esc(b.name)}<span class="u">count</span></th><th>Rate<span class="u">per min</span></th>`
+      : `<th><span class="sw" style="background:${esc(b.color)};display:inline-block"></span> ${esc(b.name)}<span class="u">m:ss</span></th><th>Share<span class="u">% of session</span></th>`).join('')}
+    <th>Notes</th><th></th></tr>`;
+  const rows = list.map(s => {
+    const len = s.durationSec || 0;
+    const cells = B.map(b => { const r = s.results?.[b.id] || {count:0, seconds:0};
+      return b.type==='freq'
+        ? `<td><input class="num" data-f="c:${esc(b.id)}" value="${r.count}" inputmode="numeric" aria-label="${esc(b.name)} count"></td><td class="calc">${len ? r2(r.count/(len/60)).toFixed(2) : '—'}</td>`
+        : `<td><input class="num" data-f="d:${esc(b.id)}" value="${fmt(r.seconds)}" aria-label="${esc(b.name)} duration"></td><td class="calc">${len ? (r.seconds/len*100).toFixed(1)+'%' : '—'}</td>`; }).join('');
+    return `<tr data-id="${esc(s.id)}" class="${s.example?'ex':''}">
+      <td><input type="date" data-f="date" value="${esc(s.date)}" aria-label="Date"></td>
+      <td><input type="time" data-f="time" value="${esc(s.time)}" aria-label="Start time"></td>
+      <td><input class="wide" data-f="student" value="${esc(s.student)}" aria-label="${MODES[state.mode].label}"></td>
+      <td><input class="wide" data-f="setting" value="${esc(s.setting)}" aria-label="Setting"></td>
+      <td><input data-f="observer" value="${esc(s.observer)}" aria-label="Observer"></td>
+      <td><input class="num" data-f="len" value="${fmt(len)}" aria-label="Session length"></td>
+      ${cells}
+      <td><input class="notes" data-f="notes" value="${esc(s.notes)}" aria-label="Notes"></td>
+      <td class="act"><button class="btn ghost danger" data-del title="Delete this session">Delete</button></td></tr>`;
+  }).join('');
+  box.innerHTML = `<thead>${head}</thead><tbody>${rows || `<tr><td colspan="99" style="padding:24px" class="muted">No sessions yet. Record one on the Record tab.</td></tr>`}</tbody>`;
+}
+$('#table').addEventListener('change', e => {
+  const inp = e.target.closest('input'); if(!inp) return;
+  const s = state.sessions.find(x => x.id === inp.closest('tr').dataset.id); if(!s) return;
+  const f = inp.dataset.f, v = inp.value;
+  if(['date','time','student','setting','observer','notes'].includes(f)) s[f] = v.trim();
+  else if(f === 'len'){ const n = parseDur(v); if(n == null){ toast('Use minutes:seconds, e.g. 15:30'); inp.value = fmt(s.durationSec); return; } s.durationSec = n; }
+  else { const [k, bid] = f.split(':'); s.results = s.results || {}; const r = s.results[bid] = s.results[bid] || {count:0, seconds:0};
+    if(k === 'c'){ const n = parseInt(v,10); if(isNaN(n) || n < 0){ toast('Enter a whole number'); inp.value = r.count; return; } r.count = n; }
+    else { const n = parseDur(v); if(n == null){ toast('Use minutes:seconds, e.g. 2:45'); inp.value = fmt(r.seconds); return; } r.seconds = n; } }
+  saveSession(s); tableDirty = true; refreshLists(); if(view==='graphs') renderGraphs();
+});
+$('#table').addEventListener('focusout', () => setTimeout(() => { if(tableDirty && !$('#table').contains(document.activeElement)) renderData(); }, 0));
+$('#table').addEventListener('keydown', e => { if(e.key === 'Enter' && e.target.matches('input')) e.target.blur(); });
+$('#table').addEventListener('click', e => {
+  const b = e.target.closest('[data-del]'); if(!b) return;
+  if(!b.classList.contains('confirm')){ b.classList.add('confirm'); b.textContent = 'Confirm'; setTimeout(() => { b.classList.remove('confirm'); b.textContent = 'Delete'; }, 3000); return; }
+  const s = state.sessions.find(x => x.id === b.closest('tr').dataset.id); if(s){ deleteSession(s); toast('Session deleted'); }
+});
+$('#dStudent').addEventListener('change', renderData);
+
+/* ---------- Excel ---------- */
+const MIME = {xlsx:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', json:'application/json', png:'image/png'};
+const isTouch = matchMedia('(hover: none) and (pointer: coarse)').matches; // phones and tablets, not touch laptops
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const PICK_TYPES = {
+  xlsx: {description:'Excel workbook', accept:{[MIME.xlsx]:['.xlsx']}},
+  json: {description:'Behavior Log backup', accept:{'application/json':['.json']}},
+  png:  {description:'PNG image', accept:{'image/png':['.png']}},
+};
+function shareWithTap(file){ return new Promise(res => {
+  const bar = $('#saveBar'); $('#saveBarText').textContent = file.name + ' is ready.'; bar.hidden = false;
+  const done = v => { bar.hidden = true; res(v); };
+  $('#saveBarX').onclick = () => done(false);
+  $('#saveBarBtn').onclick = async () => {
+    try { await navigator.share({files:[file], title: file.name}); done(true); }
+    catch(e){ done(false); if(!e || e.name !== 'AbortError') toast('Could not open the share sheet'); } };
+}); }
+/* Saves a file. `source` is a Blob or a promise of one. Returns true when the file was saved or handed to the device.
+   Laptops (Edge, Chrome): a "Save as" window lets you choose the folder and name.
+   iPhone and iPad: the share sheet (Save to Files, AirDrop, email). Android: a normal download to the Downloads folder. */
+async function offerFile(filename, source){
+  const ext = filename.split('.').pop(), type = MIME[ext] || 'application/octet-stream';
+  let blob;
+  try { blob = new Blob([await source], {type}); } catch(e){ console.warn(e); toast('Could not create the file'); return false; }
+
+  if(!isTouch && typeof window.showSaveFilePicker === 'function'){
+    try {
+      const handle = await window.showSaveFilePicker({suggestedName: filename, types: PICK_TYPES[ext] ? [PICK_TYPES[ext]] : undefined});
+      const w = await handle.createWritable(); await w.write(blob); await w.close();
+      toast('Saved ' + handle.name); return true;
+    } catch(e){
+      if(e && e.name === 'AbortError') return false;   // you closed the Save window
+      console.warn('Save window unavailable, downloading instead', e);
+    }
+  }
+  if(isIOS && navigator.canShare){
+    const file = new File([blob], filename, {type});
+    try { if(navigator.canShare({files:[file]})){ await navigator.share({files:[file], title: filename}); return true; } }
+    catch(e){
+      if(e && e.name === 'AbortError') return false;
+      if(e && e.name === 'NotAllowedError') return shareWithTap(file);   // Safari wants a fresh tap, so ask for one
+    }
+  }
+  try {
+    const url = URL.createObjectURL(blob), a = document.createElement('a');
+    a.href = url; a.download = filename; a.rel = 'noopener'; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    toast('Downloaded ' + filename + '. Look in your Downloads folder.'); return true;
+  } catch(e){ console.warn(e); toast('Could not save the file on this device'); return false; }
+}
+
+/* Minimal .xlsx writer (Office Open XML) on top of JSZip. Cells: string, number, null, or {f: formula, v: cached number}. */
+function buildXlsx(sheets){
+  const xml = s => String(s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const col = n => { let s = ''; n++; while(n){ const m = (n-1) % 26; s = String.fromCharCode(65+m) + s; n = Math.floor((n-1)/26); } return s; };
+  const used = new Set();
+  const sheetName = n => { let b = String(n).replace(/[\[\]:*?\/\\]/g, ' ').slice(0, 31) || 'Sheet', x = b, i = 2; while(used.has(x.toLowerCase())) x = b.slice(0, 28) + ' ' + i++; used.add(x.toLowerCase()); return x; };
+  const zip = new JSZip();
+  zip.file('[Content_Types].xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_, i) => `<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`);
+  zip.file('_rels/.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`);
+  zip.file('docProps/core.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Behavior observation data</dc:title><dc:creator>Behavior Observation Log</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().slice(0,19)}Z</dcterms:created></cp:coreProperties>`);
+  const names = sheets.map(s => sheetName(s.name));
+  zip.file('xl/workbook.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${names.map((n, i) => `<sheet name="${xml(n)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets><definedNames>${sheets.map((s, i) => s.autofilter && s.rows.length > 1 ? `<definedName name="_xlnm._FilterDatabase" localSheetId="${i}" hidden="1">'${xml(names[i]).replace(/'/g, "''")}'!$A$1:$${col(s.rows[0].length-1)}$${s.rows.length}</definedName>` : '').join('')}</definedNames><calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`.replace('<definedNames></definedNames>', ''));
+  zip.file('xl/_rels/workbook.xml.rels', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${sheets.map((_, i) => `<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`);
+  // styles: 0 default, 1 header (bold, light green fill, wrap), 2 wrapped text, 3 number 0.00, 4 number 0.0
+  zip.file('xl/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="0.00"/><numFmt numFmtId="165" formatCode="0.0"/></numFmts><fonts count="2"><font><sz val="11"/><name val="Calibri"/><family val="2"/></font><font><b/><sz val="11"/><name val="Calibri"/><family val="2"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FFDDEDE6"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border><border><left/><right/><top/><bottom style="thin"><color rgb="FF1D6A55"/></bottom><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`);
+  sheets.forEach((s, i) => {
+    const ncol = Math.max(1, ...s.rows.map(r => r.length));
+    const rows = s.rows.map((r, ri) => `<row r="${ri+1}">${r.map((v, ci) => {
+      const ref = col(ci) + (ri+1), st = ri === 0 && s.header ? 1 : (s.styles?.[ci] || 0), sa = st ? ` s="${st}"` : '';
+      if(v == null || v === '') return '';
+      if(typeof v === 'object') return `<c r="${ref}"${sa}><f>${xml(v.f)}</f>${v.v != null && isFinite(v.v) ? `<v>${v.v}</v>` : ''}</c>`;
+      if(typeof v === 'number' && isFinite(v)) return `<c r="${ref}"${sa}><v>${v}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"${sa}><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
+    }).join('')}</row>`).join('');
+    const pane = s.header && s.rows.length > 1 ? `<sheetViews><sheetView workbookViewId="0"${i===0?' tabSelected="1"':''}><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>` : `<sheetViews><sheetView workbookViewId="0"/></sheetViews>`;
+    const cols = s.widths ? `<cols>${s.widths.map((w, ci) => `<col min="${ci+1}" max="${ci+1}" width="${w}" customWidth="1"/>`).join('')}</cols>` : '';
+    const af = s.autofilter && s.rows.length > 1 ? `<autoFilter ref="A1:${col(ncol-1)}${s.rows.length}"/>` : '';
+    zip.file(`xl/worksheets/sheet${i+1}.xml`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><dimension ref="A1:${col(ncol-1)}${Math.max(1, s.rows.length)}"/>${pane}<sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${rows}</sheetData>${af}</worksheet>`);
+  });
+  return zip.generateAsync({type:'blob', compression:'DEFLATE', mimeType: MIME.xlsx});
+}
+function workbookSheets(list){
+  const B = state.behaviors;
+  const head = ['Date','Start time',MODES[state.mode].label,'Setting / activity','Observer','Session length (min)'];
+  const styles = {5:3};
+  B.forEach(b => { if(b.type === 'freq'){ styles[head.length+1] = 3; head.push(`${b.name}: count`, `${b.name}: rate per min`); }
+    else { styles[head.length+1] = 3; styles[head.length+2] = 4; head.push(`${b.name}: episodes`, `${b.name}: minutes`, `${b.name}: % of session`); } });
+  styles[head.length] = 2; head.push('Notes');
+  const L = n => { let s = ''; n++; while(n){ const m = (n-1) % 26; s = String.fromCharCode(65+m) + s; n = Math.floor((n-1)/26); } return s; };
+  const rows = [head];
+  list.forEach((s, i) => { const R = i + 2, len = s.durationSec/60, lenRef = 'F' + R;
+    const row = [s.date, s.time, s.student, s.setting, s.observer, r2(len)];
+    B.forEach(b => { const r = s.results?.[b.id] || {count:0, seconds:0};
+      if(b.type === 'freq'){ const c = L(row.length) + R; row.push(r.count, {f:`IF(${lenRef}>0,ROUND(${c}/${lenRef},2),0)`, v: len ? r2(r.count/len) : 0}); }
+      else { const m = L(row.length+1) + R; row.push(r.count, r2(r.seconds/60), {f:`IF(${lenRef}>0,ROUND(${m}/${lenRef}*100,1),0)`, v: len ? Math.round(r.seconds/60/len*1000)/10 : 0}); } });
+    row.push(s.notes || ''); rows.push(row); });
+  const ev = [['Date','Start time',MODES[state.mode].label,'Setting / activity','Time into session','Seconds','Behavior','Event']];
+  list.forEach(s => (s.events || []).forEach(e => ev.push([s.date, s.time, s.student, s.setting, fmt(e.t), e.t, behById(e.b)?.name || e.b, e.k==='tap'?'Occurred':e.k==='start'?'Started':'Stopped'])));
+  return [
+    {name:'Sessions', rows, header:true, autofilter:true, styles, widths: head.map((h, i) => i === head.length-1 ? 48 : Math.max(11, Math.min(24, h.length + 2)))},
+    {name:'Event log', rows: ev, header:true, autofilter:true, widths:[12,10,16,22,16,9,22,10]},
+    {name:'Behavior definitions', rows: [['Behavior','Recording method','Operational definition'], ...B.map(b => [b.name, b.type==='freq'?'Frequency (count)':'Duration (time)', b.def||''])], header:true, styles:{2:2}, widths:[22,18,80]},
+  ];
+}
+$('#bExport').addEventListener('click', async () => {
+  if(!window.JSZip){ toast('The app did not load fully. Reload it while online.'); return; }
+  const f = $('#dStudent').value, list = sorted(cur().filter(s => !f || s.student === f));
+  if(!list.length){ toast('No sessions to export yet'); return; }
+  try { offerFile(`${state.mode}-observations${f ? '-' + f.replace(/[^\w.-]+/g,'_').replace(/^[._-]+|[._-]+$/g,'') : ''}-${today()}.xlsx`, buildXlsx(workbookSheets(list))); }
+  catch(e){ console.warn(e); toast('Could not build the Excel file'); }
+});
+
+/* ---------- graphs ---------- */
+const charts = {};
+const tok = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const bgPlugin = { id:'bg', beforeDraw(c){ const x = c.ctx; x.save(); x.fillStyle = tok('--surface'); x.fillRect(0,0,c.width,c.height); x.restore(); } };
+function mkChart(key, canvas, cfg){
+  charts[key]?.destroy();
+  const ink = tok('--ink'), muted = tok('--muted'), line = tok('--line');
+  cfg.options = Object.assign({ responsive:true, maintainAspectRatio:false, animation:{duration:300},
+    interaction:{mode:'index', intersect:false},
+    plugins:{ legend:{position:'bottom', labels:{color:ink, boxWidth:12, font:{family:tok('--f-body'), size:13}}},
+      tooltip:{titleFont:{family:tok('--f-body')}, bodyFont:{family:tok('--f-body')}} },
+    scales:{ x:{ticks:{color:muted, font:{family:tok('--f-body')}}, grid:{color:line, display:false}, border:{color:line}},
+             y:{beginAtZero:true, ticks:{color:muted, font:{family:tok('--f-mono')}}, grid:{color:line}, border:{display:false}, title:{display:true, color:muted, text:cfg.yTitle}} } }, cfg.options||{});
+  if(cfg.yMax) cfg.options.scales.y.max = cfg.yMax;
+  charts[key] = new Chart(canvas, {type:cfg.type, data:cfg.data, options:cfg.options, plugins:[bgPlugin]});
+}
+function renderGraphs(){
+  if(view !== 'graphs' || !window.Chart) return;
+  const stu = $('#gStudent').value, set = $('#gSetting').value;
+  const all = sorted(cur().filter(s => s.student === stu));
+  const list = all.filter(s => !set || s.setting === set);
+  const total = list.reduce((a,s) => a + (s.durationSec||0), 0);
+  const F = state.behaviors.filter(b => b.type==='freq'), D = state.behaviors.filter(b => b.type==='dur');
+  const first = F[0];
+  const rate = (s,b) => s.durationSec ? r2((s.results?.[b.id]?.count||0)/(s.durationSec/60)) : 0;
+  const pct = (s,b) => s.durationSec ? Math.round((s.results?.[b.id]?.seconds||0)/s.durationSec*1000)/10 : 0;
+  let trend = '—';
+  if(first && list.length >= 2){ const a = rate(list[0], first), z = rate(list[list.length-1], first); trend = `${a.toFixed(2)} → ${z.toFixed(2)}`; }
+  $('#stats').innerHTML = `
+    <div class="stat"><span class="label">Sessions</span><b>${list.length}</b></div>
+    <div class="stat"><span class="label">Time observed</span><b>${fmt(total)}</b></div>
+    <div class="stat"><span class="label">Dates</span><b style="font-size:1.05rem">${list.length ? esc(list[0].date.slice(5)) + ' to ' + esc(list[list.length-1].date.slice(5)) : '—'}</b></div>
+    <div class="stat"><span class="label">${first ? esc(first.name) + ', first → latest' : 'Rate'}</span><b style="font-size:1.15rem">${trend}<span class="muted" style="font-size:.8rem"> /min</span></b></div>`;
+  const labels = list.map(s => s.date.slice(5).replace('-','/') + (list.filter(x => x.date === s.date).length > 1 ? ' ' + s.time : ''));
+  const ds = (b, fn) => ({label:b.name, data:list.map(s => fn(s,b)), borderColor:b.color, backgroundColor:b.color, tension:0, pointRadius:4, pointHoverRadius:6, borderWidth:2.5});
+  $('#pRate').hidden = !F.length; $('#pPct').hidden = !D.length; $('#pSet').hidden = !F.length;
+  if(F.length) mkChart('rate', $('#cRate'), {type:'line', yTitle:'Per minute', data:{labels, datasets:F.map(b => ds(b, rate))}});
+  if(D.length) mkChart('pct', $('#cPct'), {type:'line', yTitle:'% of session', yMax:100, data:{labels, datasets:D.map(b => ds(b, pct))}});
+  if(F.length){
+    const settings = [...new Set(all.map(s => s.setting || 'Not recorded'))];
+    const avg = (b, st) => { const ss = all.filter(s => (s.setting||'Not recorded') === st); const mins = ss.reduce((a,s) => a + s.durationSec/60, 0);
+      return mins ? r2(ss.reduce((a,s) => a + (s.results?.[b.id]?.count||0), 0)/mins) : 0; };
+    mkChart('set', $('#cSet'), {type:'bar', yTitle:'Per minute', data:{labels:settings, datasets:F.map(b => ({label:b.name, data:settings.map(st => avg(b,st)), backgroundColor:b.color, borderRadius:4, maxBarThickness:48}))}});
+  }
+}
+$('#gStudent').addEventListener('change', () => { $('#gSetting').value = ''; refreshLists(); renderGraphs(); });
+$('#gSetting').addEventListener('change', renderGraphs);
+document.querySelectorAll('[data-png]').forEach(b => b.addEventListener('click', () => {
+  const c = charts[b.dataset.png]; if(!c) return;
+  offerFile(`${state.mode}-${b.dataset.png === 'rate' ? 'frequency' : b.dataset.png === 'pct' ? 'duration' : 'by-setting'}-${($('#gStudent').value||'chart').replace(/[^\w.-]+/g,'_').replace(/^[._-]+|[._-]+$/g,'')}.png`,
+    new Promise((res, rej) => c.canvas.toBlob(bl => bl ? res(bl) : rej(new Error('no image')), 'image/png')));
+}));
+const rerenderTheme = () => { if(view === 'graphs') renderGraphs(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', rerenderTheme);
+new MutationObserver(rerenderTheme).observe(document.documentElement, {attributes:true, attributeFilter:['data-theme']});
+
+/* ---------- behavior setup ---------- */
+function renderSetup(){
+  $('#behList').innerHTML = state.behaviors.map(b => `
+    <div class="beh" data-id="${esc(b.id)}">
+      <input type="color" data-k="color" value="${esc(b.color)}" aria-label="Color for ${esc(b.name)}">
+      <label class="field"><span class="label">Name</span><input data-k="name" value="${esc(b.name)}"></label>
+      <label class="field ty"><span class="label">Recording method</span><select data-k="type"><option value="freq" ${b.type==='freq'?'selected':''}>Frequency (count)</option><option value="dur" ${b.type==='dur'?'selected':''}>Duration (time)</option></select></label>
+      <div class="del" style="align-self:end"><button class="btn ghost danger" data-delb>Remove</button></div>
+      <label class="field def"><span class="label">Operational definition</span><input data-k="def" value="${esc(b.def||'')}" placeholder="What exactly counts as this behavior? When does it start and stop?"></label>
+    </div>`).join('');
+}
+$('#behList').addEventListener('change', e => {
+  const k = e.target.dataset.k; if(!k) return;
+  if(rec){ toast('Finish the current session before changing behaviors'); renderSetup(); return; }
+  const b = behById(e.target.closest('.beh').dataset.id); b[k] = e.target.value.trim() || (k==='name' ? 'Unnamed behavior' : '');
+  saveConfig(); renderTiles(); renderRecordLive(); renderData();
+});
+$('#behList').addEventListener('click', e => {
+  const btn = e.target.closest('[data-delb]'); if(!btn) return;
+  if(rec){ toast('Finish the current session before changing behaviors'); return; }
+  if(!btn.classList.contains('confirm')){ btn.classList.add('confirm'); btn.textContent = 'Confirm'; setTimeout(() => { btn.classList.remove('confirm'); btn.textContent = 'Remove'; }, 3000); return; }
+  const id = btn.closest('.beh').dataset.id; state.behaviors = state.behaviors.filter(b => b.id !== id);
+  saveConfig(); renderEverything(); toast('Behavior removed. Past counts stay in saved sessions.');
+});
+$('#bAddBeh').addEventListener('click', () => {
+  if(rec){ toast('Finish the current session before changing behaviors'); return; }
+  const used = state.behaviors.map(b => b.color);
+  state.behaviors.push({id:newId('b-'), name:'New behavior', type:'freq', color: COLORS.find(c => !used.includes(c)) || COLORS[state.behaviors.length % COLORS.length], def:''});
+  saveConfig(); renderEverything(); const last = $('#behList .beh:last-child input[data-k="name"]'); last?.focus(); last?.select();
+});
+
+/* ---------- boot ---------- */
+function applyModeLabels(){
+  const M = MODES[state.mode];
+  document.documentElement.dataset.mode = state.mode;
+  $('#lblSubject').textContent = M.label; $('#lblDSubject').textContent = M.label; $('#lblGSubject').textContent = M.label;
+  $('#mStudent').placeholder = M.ph; $('#mNotes').placeholder = M.notes;
+  $('#setupTitle').textContent = `Behaviors to record (${M.label.toLowerCase()} observations)`; $('#setupIntro').innerHTML = M.intro;
+  document.querySelectorAll('#modeSeg button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode)));
+}
+function renderEverything(){ applyModeLabels(); renderTiles(); renderRecord(); refreshLists(); renderData(); renderSetup(); renderGraphs(); }
+document.querySelectorAll('#modeSeg button').forEach(b => b.addEventListener('click', () => {
+  const m = b.dataset.mode; if(m === state.mode) return;
+  if(rec){ toast('Finish or discard the current session before switching'); return; }
+  state.mode = m; lsSet('bol-mode', m);
+  $('#mStudent').value = ''; $('#gStudent').innerHTML = ''; $('#dStudent').innerHTML = '';
+  applyExamples(); renderEverything();
+}));
+const draft = lsGet(LS_DRAFT);
+if(draft && draft.events?.length){
+  rec = {...draft, running:false}; delete rec.meta; if(draft.mode === 'teacher' || draft.mode === 'student') state.mode = draft.mode;
+  if(draft.meta){ $('#mStudent').value = draft.meta.student||''; $('#mSetting').value = draft.meta.setting||''; $('#mObserver').value = draft.meta.observer||''; $('#mNotes').value = draft.meta.notes||''; }
+  $('#draftNotice').hidden = false;
+}
+const obs = lsGet('bol-observer'); if(obs && !$('#mObserver').value) $('#mObserver').value = obs;
+$('#mObserver').addEventListener('change', e => lsSet('bol-observer', e.target.value.trim()));
+['#mStudent','#mSetting','#mNotes'].forEach(s => $(s).addEventListener('change', saveDraft));
+$('#appVer').textContent = APP_VERSION;
+applyExamples(); renderEverything();
+initStore();
+
+/* ---------- install + offline ---------- */
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const ua = navigator.userAgent;
+let installEvt = null;
+const inApp = /\bLine\/|FBAN|FBAV|FB_IAB|Instagram|MicroMessenger|WhatsApp|Snapchat|TikTok|; wv\)/i.test(ua);
+const BANNER_KEY = 'bol-install-hidden';
+function renderBanner(){
+  const bn = $('#installBanner'), hidden = lsGet(BANNER_KEY) && Date.now() - lsGet(BANNER_KEY) < 14*86400000;
+  $('#inAppWarn').hidden = !inApp || standalone;
+  if(standalone || inApp || hidden || !(isTouch || installEvt)){ bn.hidden = true; return; }
+  bn.hidden = false; $('#ibInstall').hidden = !installEvt;
+  $('#ibText').innerHTML = installEvt ? '<b>Install this app</b> on your phone so it opens like a normal app and works without internet.'
+    : isIOS ? '<b>Install this app first.</b> Tap the <b>Share</b> button (the square with an arrow, at the bottom of Safari), then <b>Add to Home Screen</b>. Always record in the installed app, because the browser and the installed app keep separate data.'
+    : '<b>Install this app first.</b> Tap the browser menu (⋮), then <b>Install app</b> or <b>Add to Home screen</b>.';
+}
+$('#ibClose').addEventListener('click', () => { lsSet(BANNER_KEY, Date.now()); renderBanner(); });
+$('#ibInstall').addEventListener('click', () => $('#bInstall').click());
+function renderInstall(){
+  renderBanner();
+  const t = $('#installText'), b = $('#bInstall');
+  if(standalone){ t.textContent = 'The app is installed on this device and works without internet.'; b.hidden = true; return; }
+  if(installEvt){ t.textContent = 'Add the app to this device. It then opens in its own window and works without internet.'; b.hidden = false; return; }
+  b.hidden = true;
+  t.textContent = isIOS ? 'On iPhone or iPad: open this page in Safari, tap the Share button, then tap “Add to Home Screen”.'
+    : 'In Chrome or Edge: use the install icon at the right of the address bar, or the browser menu → “Install app”. On Android: menu → “Add to Home screen”.';
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; renderInstall(); });
+window.addEventListener('appinstalled', () => { installEvt = null; toast('Installed. Open Behavior Log from your home screen or apps.'); renderInstall(); });
+$('#bInstall').addEventListener('click', async () => { if(!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch {} installEvt = null; renderInstall(); });
+renderInstall();
+
+if('serviceWorker' in navigator && location.protocol !== 'file:'){
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloading) return; reloading = true; location.reload(); });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    const offer = w => { if(!w) return; $('#updNotice').hidden = false; $('#bUpdate').onclick = () => {
+      if(rec){ toast('Finish the current session first, then update'); return; } w.postMessage('SKIP_WAITING'); }; };
+    if(reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => { const w = reg.installing; w?.addEventListener('statechange', () => { if(w.state === 'installed' && navigator.serviceWorker.controller) offer(w); }); });
+    setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000);
+  }).catch(e => console.warn('Offline mode unavailable', e));
+}
+})();
+</script>
+</body>
+</html>
